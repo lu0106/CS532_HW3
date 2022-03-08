@@ -8,32 +8,32 @@ To run: use command:
 ./hw3 -f jpg -E "tar cvf jpg.tar"
 ./hw3 -f txt -e "ls -l -s"
 */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <dirent.h>
-#include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
+#include <sys/types.h>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <string.h>
+#include <fcntl.h>
 
 // same as HW2
-typedef int MYFUNC(char *path, int size, char *str, int S, int d, int t, int count, int c);
-int test(char *path, int size, char *str, int S, int d, int t, int count, int c);
+typedef int FileFunction(char *path, int size, char *str, int S, int d, int t, int nestingC, int countspace);
+int test(char *path, int size, char *str, int S, int d, int t, int nestingC, int countspace);
+int test2(char *path, int size, char *str, int S, int d, int t, int nestingC, int countspace, FileFunction *function);
 int get_file_size(char *file_name);
-int opfunc(char *path, int size, char *str, int S, int d, int t, int count, int c, MYFUNC *function);
 
 char **ppath; // pwd path
 int pnumber = 0; // pwd number
 int *fta; // file type array
+int k = 0; // for loop
 
 // Reference https://www.delftstack.com/zh-tw/howto/c/optind-in-c/
 int main(int argc, char *argv[]){
 
     ppath = (char **)malloc( 1024*sizeof( char *));
-    int i;
-    for(i = 0; i < 1024; i++){
-        ppath[i] = (char *)malloc( 128*sizeof( char));
+    for(k = 0; k < 1024; k++){
+        ppath[k] = (char *)malloc( 128*sizeof( char));
     }
     fta = (int *)calloc(128, sizeof(int));
 
@@ -63,8 +63,8 @@ int main(int argc, char *argv[]){
     pid_t pid;
     int exit_status;
 
-    int count = 1;
-    int c = 0;
+    int nestingC = 1;
+    int countspace = 0;
 
     int result;
     while((result = getopt(argc, argv, "Ss:f:t:E:e:")) != -1){
@@ -73,9 +73,7 @@ int main(int argc, char *argv[]){
                 S = 1;
                 break;
             case 's':
-                if(atoi(optarg) > size){
-                    size = atoi(optarg);
-                }
+                size = atoi(optarg);
                 break;
             case 'f':
                 strcpy(str, optarg);
@@ -107,55 +105,52 @@ int main(int argc, char *argv[]){
         strcat(addr2, argv[argc-1]);
     
         if(argc == 1){
-            opfunc(addr2, 0, str, 0, 0, 0, count, c, test);
+            test2(addr2, 0, str, 0, 0, 0, nestingC, countspace, test);
         }
         else{
-            opfunc(addr2, size, str, S, d, t, count, c, test);
+            test2(addr2, size, str, S, d, t, nestingC, countspace, test);
         }
     }
     
     if(argc == 1){
-        opfunc(addr, 0, str, 0, 0, 0, count, c, test);
+        test2(addr, 0, str, 0, 0, 0, nestingC, countspace, test);
     }
     else{
-        opfunc(addr, size, str, S, d, t, count, c, test);
+        test2(addr, size, str, S, d, t, nestingC, countspace, test);
     }
 
 // Reference http://c.biancheng.net/cpp/html/289.html
 // Reference https://wenyuangg.github.io/posts/linux/fork-use.html
 
     pid = fork();
-
     if(pid == 0){  //fork()=0, child process
         if(E == 1){
             char *cppath = (char *)calloc(4096, sizeof(char));
             char put[4096];
-            memset(put, 0,sizeof(put));
-            int i = 0;
-            strcpy(cppath, ppath[i]);
+            memset(put, 0, sizeof(put));
+            strcpy(cppath, ppath[k]);
 
-            for(i = 1; i < pnumber; i++){
-                if(ppath[i] == NULL){
+            for(k = 1; k < pnumber; k++){
+                if(ppath[k] == NULL){
                     break;
                 }
                 strcat(cppath, " ");
-                strcat(cppath, ppath[i]);
+                strcat(cppath, ppath[k]);
             }
             sprintf(put, "%s %s", strE, cppath);
             system(put);
         }
 
         if(e == 1){
-            int i = 0;
             char put[128];
             DIR *Dir;
             struct dirent *dirent;
 
             memset(put, 0,sizeof(put));
 
-            for(i = 0; i < pnumber; i++){
-                if(fta[i] == 1){
-                    sprintf(put, "%s %s", stre, ppath[i]);
+            for(k = 0; k < pnumber; k++){
+                if(fta[k] == 1){
+                    sprintf(put, "%s %s", stre, ppath[k]);
                     system(put);
                     printf("\n");
                 }
@@ -169,7 +164,7 @@ int main(int argc, char *argv[]){
     }
 
     else{  //fork()>0, parent
-        wait(&exit_status);  //stop child process
+        wait(&exit_status);  //wait child process
         printf("[Parent] Child's exit status is [%d]\n", WEXITSTATUS(exit_status));
     }
     return 0;
@@ -178,7 +173,7 @@ int main(int argc, char *argv[]){
 // same as HW2
 // get the type of file
 // Reference http://www.gnu.org/software/libc/manual/html_node/Directory-Entries.html
-char *type_of_file(unsigned char type){
+char *get_file_type(unsigned char type){
 
     char *print;
     switch (type){
@@ -212,18 +207,17 @@ char *type_of_file(unsigned char type){
     return print;
 }
 
-int test(char *path, int size, char *str, int S, int d, int t, int count, int c){
+int test(char *path, int size, char *str, int S, int d, int t, int nestingC, int countspace){
 
     struct dirent *ptr;
     int file_size = 2147483647; // max int
 
     char directory_name[999];
     memset(directory_name, 0,sizeof(directory_name));
-    int i;
 
     DIR *Dir = opendir(path);
     if (Dir == NULL){
-        printf("Error\n");
+        printf("Directory Opening Error!\n");
         exit(EXIT_FAILURE);
     }
 
@@ -235,10 +229,10 @@ int test(char *path, int size, char *str, int S, int d, int t, int count, int c)
         //null 0 0
         if((str == NULL) && (t == 0) && (d == 0)){
             if(file_size >= size){
-                for (i = 0; i < c; ++i){
-                    printf("     ");
+                for (k = 0; k < countspace; k++){
+                    printf("         ");
                 }
-                printf("%s (File Type: %s)", (*ptr).d_name, type_of_file((*ptr).d_type));
+                printf("[%d] %s (File Type: %s)", countspace, (*ptr).d_name, get_file_type((*ptr).d_type));
 
                 if (!(strcmp((*ptr).d_name, ".") == 0 || strcmp((*ptr).d_name, "..") == 0)){
                         sprintf(ppath[pnumber], "%s/%s", path, (*ptr).d_name);
@@ -263,21 +257,20 @@ int test(char *path, int size, char *str, int S, int d, int t, int count, int c)
                 }
                 else if (!(strcmp((*ptr).d_name, ".") == 0 || strcmp((*ptr).d_name, "..") == 0)){
                     sprintf(directory_name, "%s/%s", path, (*ptr).d_name); // directory_name = path, ptr.d_name
-                    test(directory_name, size, str, S, d, t, count, c + 1); // c+1
+                    test(directory_name, size, str, S, d, t, nestingC, countspace + 1); // c+1
                 }
-                count++;
+                nestingC = nestingC +1;
             }
-
         }
 
         //null 0 1
         if((str == NULL) && (t == 0) && (d == 1)){
-            if(strcmp(type_of_file((*ptr).d_type), "directory") == 0){
+            if(strcmp(get_file_type((*ptr).d_type), "directory") == 0){
                 if(file_size >= size){
-                    for (i = 0; i < c; ++i){
-                        printf("     ");
+                    for (k = 0; k < countspace; k++){
+                        printf("         ");
                     }
-                    printf("%s (File Type: %s)", (*ptr).d_name, type_of_file((*ptr).d_type));
+                    printf("[%d] %s (File Type: %s)", countspace,(*ptr).d_name, get_file_type((*ptr).d_type));
 
                     if (!(strcmp((*ptr).d_name, ".") == 0 || strcmp((*ptr).d_name, "..") == 0)){
                         sprintf(ppath[pnumber], "%s/%s", path, (*ptr).d_name);
@@ -303,9 +296,9 @@ int test(char *path, int size, char *str, int S, int d, int t, int count, int c)
                     }
                     else if (!(strcmp((*ptr).d_name, ".") == 0 || strcmp((*ptr).d_name, "..") == 0)){
                         sprintf(directory_name, "%s/%s", path, (*ptr).d_name); // directory_name = path, ptr.d_name
-                        test(directory_name, size, str, S, d, t, count, c+1); // c+1
+                        test(directory_name, size, str, S, d, t, nestingC, countspace+1); // c+1
                     }
-                    count++;
+                    nestingC = nestingC +1;
                 }
             }
         }
@@ -313,12 +306,12 @@ int test(char *path, int size, char *str, int S, int d, int t, int count, int c)
 
         //null 1 0
         if((str == NULL) && (t == 1) && (d == 0)){
-            if(strcmp( type_of_file((*ptr).d_type), "regular file") == 0){
+            if(strcmp( get_file_type((*ptr).d_type), "regular file") == 0){
                 if(file_size >= size){
-                    for (i = 0; i < c; ++i){
-                        printf("     ");
+                    for (k = 0; k < countspace; k++){
+                        printf("         ");
                     }
-                    printf("%s (File Type: %s)", (*ptr).d_name, type_of_file((*ptr).d_type));
+                    printf("[%d] %s (File Type: %s)", countspace,(*ptr).d_name, get_file_type((*ptr).d_type));
 
                     if (!(strcmp((*ptr).d_name, ".") == 0 || strcmp((*ptr).d_name, "..") == 0)){
                         sprintf(ppath[pnumber], "%s/%s", path, (*ptr).d_name);
@@ -344,9 +337,9 @@ int test(char *path, int size, char *str, int S, int d, int t, int count, int c)
                     }
                     else if (!(strcmp((*ptr).d_name, ".") == 0 || strcmp((*ptr).d_name, "..") == 0)){
                         sprintf(directory_name, "%s/%s", path, (*ptr).d_name); // directory_name = path, ptr.d_name
-                        test(directory_name, size, str, S, d, t, count, c+1); // c+1
+                        test(directory_name, size, str, S, d, t, nestingC, countspace+1); // c+1
                     }
-                    count++;
+                    nestingC = nestingC +1;
                 }
             }
         }
@@ -355,10 +348,10 @@ int test(char *path, int size, char *str, int S, int d, int t, int count, int c)
         if((str != NULL) && (t == 0) && (d == 0)){
             if(strstr((*ptr).d_name, str) != NULL){
                 if(file_size >= size){
-                    for (i = 0; i < c; ++i){
-                        printf("     ");
+                    for (k = 0; k < countspace; k++){
+                        printf("         ");
                     }
-                    printf("%s (File Type: %s)", (*ptr).d_name, type_of_file((*ptr).d_type));
+                    printf("[%d] %s (File Type: %s)", countspace,(*ptr).d_name, get_file_type((*ptr).d_type));
 
                     if (!(strcmp((*ptr).d_name, ".") == 0 || strcmp((*ptr).d_name, "..") == 0)){
                         sprintf(ppath[pnumber], "%s/%s", path, (*ptr).d_name);
@@ -379,27 +372,26 @@ int test(char *path, int size, char *str, int S, int d, int t, int count, int c)
                     }
                     printf("\n");
 
-
                     if ((*ptr).d_type != DT_DIR){ // directory
                         continue; // run next loop
                     }
                     else if (!(strcmp((*ptr).d_name, ".") == 0 || strcmp((*ptr).d_name, "..") == 0)){
                         sprintf(directory_name, "%s/%s", path, (*ptr).d_name); // directory_name = path, ptr.d_name
-                        test(directory_name, size, str, S, d, t, count, c+1); // c+1
+                        test(directory_name, size, str, S, d, t, nestingC, countspace+1); // c+1
                     }
-                    count++;
+                    nestingC = nestingC +1;
                 }
             }
         }
 
         // 0 1
         if((str != NULL) && (t == 0) && (d == 1)){
-            if((strstr( (*ptr).d_name, str) != NULL) && (strcmp( type_of_file((*ptr).d_type), "directory") == 0)){
+            if((strstr( (*ptr).d_name, str) != NULL) && (strcmp( get_file_type((*ptr).d_type), "directory") == 0)){
                 if(file_size >= size){
-                    for (i = 0; i < c; ++i){
-                        printf("     ");
+                    for (k = 0; k < countspace; k++){
+                        printf("         ");
                     }
-                    printf("%s (File Type: %s)", (*ptr).d_name, type_of_file((*ptr).d_type));
+                    printf("[%d] %s (File Type: %s)", countspace,(*ptr).d_name, get_file_type((*ptr).d_type));
 
                     if (!(strcmp((*ptr).d_name, ".") == 0 || strcmp((*ptr).d_name, "..") == 0)){
                         sprintf(ppath[pnumber], "%s/%s", path, (*ptr).d_name);
@@ -420,27 +412,26 @@ int test(char *path, int size, char *str, int S, int d, int t, int count, int c)
                     }
                     printf("\n");
 
-
                     if ((*ptr).d_type != DT_DIR){ // directory
                         continue; // run next loop
                     }
                     else if (!(strcmp((*ptr).d_name, ".") == 0 || strcmp((*ptr).d_name, "..") == 0)){
                         sprintf(directory_name, "%s/%s", path, (*ptr).d_name); // directory_name = path, ptr.d_name
-                        test(directory_name, size, str, S, d, t, count, c+1); // c+1
+                        test(directory_name, size, str, S, d, t, nestingC, countspace+1); // c+1
                     }
-                    count++;
+                    nestingC = nestingC +1;
                 }
             }
         }
 
         // 1 0
         if((str != NULL) && (t == 1) && (d == 0)){
-            if((strstr( (*ptr).d_name, str) != NULL) && (strcmp( type_of_file((*ptr).d_type), "regular file") == 0)){
+            if((strstr( (*ptr).d_name, str) != NULL) && (strcmp( get_file_type((*ptr).d_type), "regular file") == 0)){
                 if(file_size >= size){
-                    for (i = 0; i < c; ++i){
-                        printf("     ");
+                    for (k = 0; k < countspace; k++){
+                        printf("         ");
                     }
-                    printf("%s (File Type: %s)", (*ptr).d_name, type_of_file((*ptr).d_type));
+                    printf("[%d] %s (File Type: %s)", countspace, (*ptr).d_name, get_file_type((*ptr).d_type));
                     
                     if (!(strcmp((*ptr).d_name, ".") == 0 || strcmp((*ptr).d_name, "..") == 0)){
                         sprintf(ppath[pnumber], "%s/%s", path, (*ptr).d_name);
@@ -461,22 +452,21 @@ int test(char *path, int size, char *str, int S, int d, int t, int count, int c)
                     }
                     printf("\n");
 
-
                     if ((*ptr).d_type != DT_DIR){ // directory
                         continue; // run next loop
                     }
                     else if (!(strcmp((*ptr).d_name, ".") == 0 || strcmp((*ptr).d_name, "..") == 0)){
                         sprintf(directory_name, "%s/%s", path, (*ptr).d_name); // directory_name = path, ptr.d_name
-                        test(directory_name, size, str, S, d, t, count, c+1); // c+1
+                        test(directory_name, size, str, S, d, t, nestingC, countspace+1); // c+1
                     }
-                    count++;
+                    nestingC = nestingC +1;
                 }
             }
         }
 
         // Error
         if((t == 1) && (d == 1)){
-            printf("Error\n");
+            printf("Error t and d Error\n");
             exit(EXIT_FAILURE);
         }
     }
@@ -485,8 +475,8 @@ int test(char *path, int size, char *str, int S, int d, int t, int count, int c)
 }
 
 // same as HW2
-int opfunc(char *path, int size, char *str, int S, int d, int t, int count, int c, MYFUNC *function){
-    return function(path, size, str, S, d, t, count, c);
+int test2(char *path, int size, char *str, int S, int d, int t, int nestingC, int countspace, FileFunction *function){
+    return function(path, size, str, S, d, t, nestingC, countspace);
 }
 
 // same as HW2
